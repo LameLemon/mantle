@@ -15,5 +15,9 @@ export const msg_processors = [
     ["/shrug", "¯\\_(ツ)_/¯"],
     ["/tableflip", "(╯°□°）╯︵ ┻━┻"],
     ["/unflip", "┬─┬ ノ( ゜-゜ノ)"],
-    ["/shobon","(´・ω・`)"],
+    ["/shobon", "(´・ω・`)"],
+    ["/hello", "ヾ(＾∇＾)"],
+    ["/rollover", "(:3_ヽ)_"],
+    ["/lenny", "( ͡° ͜ʖ ͡°)"],
+    ["/smile", "(=^_^=)"],
 ];
