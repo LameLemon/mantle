@@ -4,7 +4,7 @@ import "./x/index.js";
 //
 import { setDataBinding } from "./util.js";
 import * as ui from "./ui.js";
-import { el_2, el_3, el_1, output, el_uonline, el_input } from "./ui.util.js";
+import { el_2, el_3, el_1, output, el_uonline, el_input, msg_processors } from "./ui.util.js";
 import * as api from "./api/index.js";
 import * as ws from "./ws.js";
 
@@ -165,10 +165,66 @@ document.getElementById("shrink_uonline").addEventListener("click", () => {
         }
     }, 30*1000);
 
+    let processor_options = [];
+
+    //
+    input.addEventListener('input', (e) => {
+        let input = e.target.value.toLowerCase();
+        if (input[0] === '/'){
+            // get possible matches
+            processor_options = [];
+            for (const processor of msg_processors) {
+                if (processor[0].toLowerCase().indexOf(input) > -1) {
+                    processor_options.push(processor);
+                }
+            }
+
+            // check if suggestion box open
+            let suggestions = document.getElementById("suggestions");
+            let ul;
+            if (!suggestions) {
+                suggestions = document.createElement("div");
+                suggestions.setAttribute("id", "suggestions");
+                ul = document.createElement("ul");
+            } else {
+                ul = suggestions.children[0];
+            }
+            while(ul.firstChild) ul.removeChild(ul.firstChild);
+
+            // create suggestion box
+            for (const processor of processor_options) {
+                console.log(processor[0]);
+                let li = document.createElement("li");
+                li.appendChild(document.createTextNode(processor[0]));
+                let b = document.createElement("b");
+                b.appendChild(document.createTextNode(processor[1]))
+                li.appendChild(b);
+                ul.appendChild(li)
+            }
+            if (ul.firstChild)
+                ul.firstChild.setAttribute("id", "selected-suggestion");
+            suggestions.appendChild(ul);
+            document.body.appendChild(suggestions);
+            console.log(processor_options);
+            console.log(suggestions);
+
+        } else {
+            // if no command remove suggestions
+            processor_options = []
+            let suggestions = document.getElementById("suggestions");
+            if (suggestions)
+                suggestions.parentNode.removeChild(suggestions);
+        }
+    });
+
     //
     input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
-            const msg_con = e.target.value;
+            let msg_con = "";
+            if (processor_options.length)
+                msg_con = processor_options[0][0];
+            else
+                msg_con = e.target.value;
             if (msg_con.length === 0) return;
             socket.send(JSON.stringify({
                 type: "message",
@@ -176,6 +232,10 @@ document.getElementById("shrink_uonline").addEventListener("click", () => {
                 message: msg_con.trim(),
             }));
             e.target.value = "";
+            // remove suggestions if exists
+            let suggestions = document.getElementById("suggestions");
+            if (suggestions)
+                suggestions.parentNode.removeChild(suggestions);
         }
     });
 })();
