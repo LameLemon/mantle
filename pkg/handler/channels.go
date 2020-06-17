@@ -1,42 +1,33 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/nektro/mantle/pkg/db"
+	"github.com/nektro/mantle/pkg/handler/controls"
 	"github.com/nektro/mantle/pkg/ws"
 
 	"github.com/gorilla/mux"
-	etc "github.com/nektro/go.etc"
+	"github.com/nektro/go.etc/htp"
 )
 
 // ChannelsMe is the handler for /api/channels/@me
 func ChannelsMe(w http.ResponseWriter, r *http.Request) {
+	c := htp.GetController(r)
+	controls.GetMemberUser(c, r, w)
 	writeAPIResponse(r, w, true, http.StatusOK, db.Channel{}.All())
 }
 
 // ChannelCreate is the handler for /api/channels/create
 func ChannelCreate(w http.ResponseWriter, r *http.Request) {
-	_, user, err := apiBootstrapRequireLogin(r, w, http.MethodPost, true)
-	if err != nil {
-		fmt.Fprintln(w, err.Error())
-		return
-	}
-	if etc.AssertPostFormValuesExist(r, "name") != nil {
-		fmt.Fprintln(w, "missing post value")
-		return
-	}
-	cv, ok := ws.UserCache[user.UUID]
-	if !ok {
-		fmt.Fprintln(w, "unable to find user in ws connection cache")
-		return
-	}
-	if !cv.Perms.ManageChannels {
-		fmt.Fprintln(w, "user missing 'Perms.ManageChannels'")
-		return
-	}
+	c := htp.GetController(r)
+	user := controls.GetMemberUser(c, r, w)
+	controls.AssertFormKeysExist(c, r, "name")
+
+	usp := ws.UserPerms{}.From(user)
+	c.Assert(usp.ManageChannels, "403: action requires the manage_channels permission")
+
 	name := r.Form.Get("name")
 	nch := db.CreateChannel(name)
 	db.CreateAudit(db.ActionChannelCreate, user, nch.UUID, "", "")
@@ -49,86 +40,66 @@ func ChannelCreate(w http.ResponseWriter, r *http.Request) {
 
 // ChannelRead reads info about channel
 func ChannelRead(w http.ResponseWriter, r *http.Request) {
-	_, _, err := apiBootstrapRequireLogin(r, w, http.MethodGet, true)
-	if err != nil {
-		return
-	}
+	c := htp.GetController(r)
+	controls.GetMemberUser(c, r, w)
 	uu := mux.Vars(r)["uuid"]
-	u, ok := db.QueryChannelByUUID(uu)
-	writeAPIResponse(r, w, ok, http.StatusOK, u)
+	ch, ok := db.QueryChannelByUUID(uu)
+	writeAPIResponse(r, w, ok, http.StatusOK, ch)
 }
 
 // ChannelMessagesRead reads message data from channel
 func ChannelMessagesRead(w http.ResponseWriter, r *http.Request) {
-	_, _, err := apiBootstrapRequireLogin(r, w, http.MethodGet, true)
-	if err != nil {
-		fmt.Fprintln(w, 1)
-		return
-	}
-	c, ok := db.QueryChannelByUUID(mux.Vars(r)["uuid"])
-	if !ok {
-		fmt.Fprintln(w, 2)
-		return
-	}
-	_, lmn, err := hGrabInt(r.URL.Query().Get("limit"))
-	if err != nil {
+	c := htp.GetController(r)
+	controls.GetMemberUser(c, r, w)
+	ch, ok := db.QueryChannelByUUID(mux.Vars(r)["uuid"])
+	c.Assert(ok, "404: unable to find channel with this uuid")
+
+	slm, lmn, err := hGrabInt(r.URL.Query().Get("limit"))
+	c.Assert(len(slm) == 0 || err == nil, "400: error parsing limit query parameter")
+	if lmn == 0 {
 		lmn = 50
 	}
-	if lmn > 50 {
-		fmt.Fprintln(w, 4)
-		return
-	}
-	msgs := c.QueryMsgAfterUID(r.URL.Query().Get("after"), int(lmn))
+	c.Assert(lmn > 0, "400: limit minimum is 1")
+	c.Assert(lmn <= 50, "400: limit max is 50")
+
+	msgs := ch.QueryMsgAfterUID(r.URL.Query().Get("after"), int(lmn))
 	writeAPIResponse(r, w, true, http.StatusOK, msgs)
 }
 
 // ChannelMessagesDelete reads message data from channel
 func ChannelMessagesDelete(w http.ResponseWriter, r *http.Request) {
-	_, user, err := apiBootstrapRequireLogin(r, w, http.MethodDelete, true)
-	if err != nil {
-		fmt.Fprintln(w, 1)
-		return
-	}
-	c, ok := db.QueryChannelByUUID(mux.Vars(r)["uuid"])
-	if !ok {
-		fmt.Fprintln(w, 2)
-		return
-	}
+	c := htp.GetController(r)
+	user := controls.GetMemberUser(c, r, w)
+	ch, ok := db.QueryChannelByUUID(mux.Vars(r)["uuid"])
+	c.Assert(ok, "404: unable to find channel with this uuid")
+
 	actioned := []string{}
 	for _, item := range r.Form["ids"] {
 		if !db.IsUID(item) {
 			continue
 		}
-		user.DeleteMessage(c, item)
+		user.DeleteMessage(ch, item)
 		actioned = append(actioned, item)
 	}
-	db.CreateAudit(db.ActionChannelDelete, user, c.UUID, "", "")
 	ws.BroadcastMessage(map[string]interface{}{
 		"type":     "message-delete",
-		"channel":  c.UUID,
+		"channel":  ch.UUID,
 		"affected": actioned,
 	})
-	writeAPIResponse(r, w, true, http.StatusOK, actioned)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ChannelUpdate updates info about this channel
 func ChannelUpdate(w http.ResponseWriter, r *http.Request) {
-	_, user, err := apiBootstrapRequireLogin(r, w, http.MethodPut, true)
-	if err != nil {
-		return
-	}
+	c := htp.GetController(r)
+	user := controls.GetMemberUser(c, r, w)
 	usp := ws.UserPerms{}.From(user)
-	if !usp.ManageChannels {
-		return
-	}
-	if hGrabFormStrings(r, w, "p_name") != nil {
-		return
-	}
+	c.Assert(usp.ManageChannels, "403: action requires the manage_channels permission")
+	controls.AssertFormKeysExist(c, r, "p_name")
+
 	uu := mux.Vars(r)["uuid"]
 	ch, ok := db.QueryChannelByUUID(uu)
-	if !ok {
-		return
-	}
+	c.Assert(ok, "404: unable to find channel with this uuid")
 
 	successCb := func(rs *db.Channel, pk, pv string) {
 		db.CreateAudit(db.ActionChannelUpdate, user, rs.UUID, pk, pv)
@@ -179,22 +150,20 @@ func ChannelUpdate(w http.ResponseWriter, r *http.Request) {
 
 // ChannelDelete updates info about this channel
 func ChannelDelete(w http.ResponseWriter, r *http.Request) {
-	_, user, err := apiBootstrapRequireLogin(r, w, http.MethodDelete, true)
-	if err != nil {
-		return
-	}
+	c := htp.GetController(r)
+	user := controls.GetMemberUser(c, r, w)
 	usp := ws.UserPerms{}.From(user)
-	if !usp.ManageChannels {
-		return
-	}
+	c.Assert(usp.ManageChannels, "403: action requires the manage_channels permission")
+
 	uu := mux.Vars(r)["uuid"]
-	v, ok := db.QueryChannelByUUID(uu)
-	if !ok {
-		return
-	}
-	v.Delete()
+	ch, ok := db.QueryChannelByUUID(uu)
+	c.Assert(ok, "404: unable to find channel with this uuid")
+
+	ch.Delete()
+	db.CreateAudit(db.ActionChannelDelete, user, ch.UUID, "", "")
 	ws.BroadcastMessage(map[string]interface{}{
 		"type":    "channel-delete",
 		"channel": uu,
 	})
+	w.WriteHeader(http.StatusNoContent)
 }

@@ -91,9 +91,12 @@ x-message {
 
             a {
                 color: $cyan;
+                text-decoration: none;
+                padding-bottom: 2px;
 
                 &:hover {
                     color: $blue;
+                    border-bottom: 1px solid $blue;
                 }
             }
             img {
@@ -107,6 +110,17 @@ x-message {
                 padding: .2em;
                 border-radius: .2em;
                 line-height: 1.35;
+            }
+            x-spoiler {
+                display: inline-block;
+                padding: .1em .2em;
+                background-color: black;
+                color: black;
+
+                &.show {
+                    background-color: darken($based1, 20%);
+                    color: inherit;
+                }
             }
         }
     }

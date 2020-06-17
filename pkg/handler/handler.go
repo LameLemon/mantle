@@ -2,28 +2,36 @@ package handler
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/nektro/mantle/pkg/db"
+	"github.com/nektro/mantle/pkg/handler/controls"
+	"github.com/nektro/mantle/pkg/idata"
 	"github.com/nektro/mantle/pkg/ws"
 
 	"github.com/nektro/go-util/util"
 	etc "github.com/nektro/go.etc"
+	"github.com/nektro/go.etc/htp"
+	"github.com/nektro/go.etc/jwt"
 )
 
 // SaveOAuth2InfoCb saves info from go.oauth to user session cookie
 func SaveOAuth2InfoCb(w http.ResponseWriter, r *http.Request, provider string, id string, name string, oa2resp map[string]interface{}) {
 	ru := db.QueryUserBySnowflake(provider, id, name)
 	util.Log("[user-login]", provider, id, ru.UUID, name)
-	sess := etc.GetSession(r)
-	sess.Values["user"] = ru.UUID
-	sess.Save(r, w)
+	n, _ := os.Hostname()
+	http.SetCookie(w, &http.Cookie{
+		Name:   "jwt",
+		Value:  jwt.Get("astheno.mantle."+idata.Version+"."+n, ru.UUID, etc.JWTSecret, db.Epoch, time.Hour*24*30),
+		MaxAge: 0,
+	})
 	ru.SetName(strings.ReplaceAll(name, " ", ""))
 }
 
-// InviteGet is handler for GET /invite
+// InviteGet is handler for /
 func InviteGet(w http.ResponseWriter, r *http.Request) {
 	etc.WriteHandlebarsFile(r, w, "/invite.hbs", map[string]interface{}{
 		"data": db.Props.GetAll(),
@@ -31,12 +39,14 @@ func InviteGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// InvitePost is handler for POST /invite
+// InvitePost is handler for /invite
 func InvitePost(w http.ResponseWriter, r *http.Request) {
 	if ok, _ := strconv.ParseBool(db.Props.Get("public")); !ok {
-		s := etc.GetSession(r)
-		s.Values["code"] = r.URL.Query().Get("code")
-		s.Save(r, w)
+		http.SetCookie(w, &http.Cookie{
+			Name:    "invite_code",
+			Value:   r.URL.Query().Get("code"),
+			Expires: time.Now().Add(1 * time.Minute),
+		})
 	}
 	w.Header().Add("Location", "./login")
 	w.WriteHeader(http.StatusFound)
@@ -44,67 +54,52 @@ func InvitePost(w http.ResponseWriter, r *http.Request) {
 
 // Verify is handler for /verify
 func Verify(w http.ResponseWriter, r *http.Request) {
-	sess, user, err := apiBootstrapRequireLogin(r, w, http.MethodGet, false)
-	if err != nil {
-		return
+	c := htp.GetController(r)
+	user := controls.GetUser(c, r, w)
+	c.RedirectIf(user.IsMember, "./chat/")
+
+	cm := idata.Config.MaxMemberCount
+	if cm > 0 {
+		c.Assert(db.Props.GetInt64("count_users_members") < int64(cm), "401: unable to join, max member count has been met")
 	}
-	if !db.IsUID(user.UUID) {
-		user.ResetUID()
-		sess := etc.GetSession(r)
-		sess.Values["user"] = user.UUID
-		sess.Save(r, w)
+
+	pm := db.Props.GetInt64("count_users_members_max")
+	if pm > 0 {
+		c.Assert(db.Props.GetInt64("count_users_members") < pm, "401: unable to join, max member count has been met")
 	}
-	if user.IsMember {
-		w.Header().Add("Location", "./chat/")
-		w.WriteHeader(http.StatusFound)
-		return
-	}
+
 	if o, _ := strconv.ParseBool(db.Props.Get("public")); o {
 		if !user.IsMember {
 			user.SetAsMember(true)
+			db.CreateAudit(db.ActionInviteUse, user, "", "", "")
 		}
-		w.Header().Add("Location", "./chat/")
-		w.WriteHeader(http.StatusFound)
+		c.RedirectIf(true, "./chat/")
 		return
 	}
-	code, ok := sess.Values["code"].(string)
-	if !ok {
-		writeAPIResponse(r, w, false, http.StatusBadRequest, "invite code required to enter")
-		return
-	}
+
+	codeC, err := r.Cookie("invite_code")
+	c.Assert(err == nil, "400: invite code required to enter")
+	code := codeC.Value
+
 	inv, ok := db.QueryInviteByCode(code)
-	if !ok {
-		writeAPIResponse(r, w, false, http.StatusBadRequest, "invalid invite code")
-		return
-	}
-	if inv.IsFrozen {
-		writeAPIResponse(r, w, false, http.StatusBadRequest, "invite is frozen and can not be used")
-		return
-	}
-	if inv.MaxUses > 0 && inv.Uses >= inv.MaxUses {
-		writeAPIResponse(r, w, false, http.StatusBadRequest, "invite use count has been exceeded")
-		return
-	}
+	c.Assert(ok, "400: invalid invite code")
+	c.Assert(!inv.IsFrozen, "401: invite is frozen and can not be used")
+	c.Assert(!(inv.MaxUses > 0 && inv.Uses >= inv.MaxUses), "401: invite use count has been exceeded")
+
 	switch inv.Mode {
 	case 0:
 		// permanent
 	case 1:
 		//
 	case 2:
-		s := time.Since(inv.ExpiresOn.T())
-		if s > 0 {
-			writeAPIResponse(r, w, false, http.StatusBadRequest, "invite is expired")
-			return
-		}
+		c.Assert(time.Since(inv.ExpiresOn.T()) <= 0, "401: invite is expired")
 	}
-	//
-	inv.Use()
-	user.SetAsMember(true)
+
+	inv.Use(user)
 	for _, item := range inv.GivenRoles {
 		user.AddRole(item)
 	}
-	w.Header().Add("Location", "./chat/")
-	w.WriteHeader(http.StatusFound)
+	c.RedirectIf(true, "./chat/")
 }
 
 func Chat(w http.ResponseWriter, r *http.Request) {
@@ -115,28 +110,27 @@ func Chat(w http.ResponseWriter, r *http.Request) {
 
 // ApiAbout is handler for /api/about
 func ApiAbout(w http.ResponseWriter, r *http.Request) {
-	writeAPIResponse(r, w, true, http.StatusOK, db.Props.GetAll())
+	if len(r.URL.Query().Get("all")) > 0 {
+		c := htp.GetController(r)
+		u := controls.GetMemberUser(c, r, w)
+		c.Assert(u.HasRole("o"), "403: resource requires Authorization or to be server owner to access")
+		writeAPIResponse(r, w, true, http.StatusOK, db.Props.GetAll())
+		return
+	}
+	writeAPIResponse(r, w, true, http.StatusOK, db.Props.GetSome("name", "owner", "public", "description", "cover_photo", "profile_photo", "version", "count_users_members_max"))
 }
 
 func ApiPropertyUpdate(w http.ResponseWriter, r *http.Request) {
-	_, user, err := apiBootstrapRequireLogin(r, w, http.MethodPut, true)
-	if err != nil {
-		return
-	}
-	if hGrabFormStrings(r, w, "p_name", "p_value") != nil {
-		return
-	}
+	c := htp.GetController(r)
+	user := controls.GetMemberUser(c, r, w)
+	controls.AssertFormKeysExist(c, r, "p_name", "p_value")
+
 	n := r.Form.Get("p_name")
 	v := r.Form.Get("p_value")
 	usp := ws.UserPerms{}.From(user)
-	if !usp.ManageServer {
-		writeAPIResponse(r, w, false, http.StatusForbidden, "users require the manage_server permission to update properties.")
-		return
-	}
-	if !db.Props.Has(n) {
-		writeAPIResponse(r, w, false, http.StatusBadRequest, "specified property does not exist.")
-		return
-	}
+	c.Assert(usp.ManageServer, "403: users require the manage_server permission to update properties")
+	c.Assert(db.Props.Has(n), "400: specified property does not exist")
+
 	db.Props.Set(n, v)
 	db.CreateAudit(db.ActionSettingUpdate, user, "", n, v)
 	writeAPIResponse(r, w, true, http.StatusOK, []string{n, v})

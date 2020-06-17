@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"strconv"
 
+	"github.com/nektro/mantle/pkg/store"
+
 	dbstorage "github.com/nektro/go.dbstorage"
 )
 
@@ -26,8 +28,8 @@ type Role struct {
 //
 
 func CreateRole(name string) *Role {
-	dbstorage.InsertsLock.Lock()
-	defer dbstorage.InsertsLock.Unlock()
+	store.This.Lock()
+	defer store.This.Unlock()
 	//
 	id := db.QueryNextID(cTableRoles)
 	uid := newUUID()
@@ -35,6 +37,7 @@ func CreateRole(name string) *Role {
 	co := now()
 	r := &Role{id, uid, int(id), name, "", p, p, false, p, p, co, p}
 	db.Build().InsI(cTableRoles, r).Exe()
+	Props.Increment("count_" + cTableRoles)
 	return r
 }
 
@@ -141,6 +144,7 @@ func (v *Role) Delete() []*User {
 		aru[i] = u
 	}
 	db.Build().Del(cTableRoles).Wh("uuid", v.UUID).Exe()
+	Props.Decrement("count_" + cTableRoles)
 	return aru
 }
 

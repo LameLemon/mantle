@@ -4,17 +4,17 @@ import (
 	"net/http"
 
 	"github.com/nektro/mantle/pkg/db"
+	"github.com/nektro/mantle/pkg/handler/controls"
 	"github.com/nektro/mantle/pkg/ws"
 
 	"github.com/gorilla/mux"
+	"github.com/nektro/go.etc/htp"
 )
 
 // UsersMe is handler for /api/users/@me
 func UsersMe(w http.ResponseWriter, r *http.Request) {
-	_, user, err := apiBootstrapRequireLogin(r, w, http.MethodGet, true)
-	if err != nil {
-		return
-	}
+	c := htp.GetController(r)
+	user := controls.GetMemberUser(c, r, w)
 	writeAPIResponse(r, w, true, http.StatusOK, map[string]interface{}{
 		"me":    user,
 		"perms": ws.UserPerms{}.From(user),
@@ -23,10 +23,8 @@ func UsersMe(w http.ResponseWriter, r *http.Request) {
 
 // UsersRead is handler for /api/users/{uuid}
 func UsersRead(w http.ResponseWriter, r *http.Request) {
-	_, _, err := apiBootstrapRequireLogin(r, w, http.MethodGet, true)
-	if err != nil {
-		return
-	}
+	c := htp.GetController(r)
+	controls.GetMemberUser(c, r, w)
 	uu := mux.Vars(r)["uuid"]
 	u, ok := db.QueryUserByUUID(uu)
 	writeAPIResponse(r, w, ok, http.StatusOK, u)
@@ -34,27 +32,19 @@ func UsersRead(w http.ResponseWriter, r *http.Request) {
 
 // UsersOnline is handler for /api/users/online
 func UsersOnline(w http.ResponseWriter, r *http.Request) {
-	_, _, err := apiBootstrapRequireLogin(r, w, http.MethodGet, true)
-	if err != nil {
-		return
-	}
+	c := htp.GetController(r)
+	controls.GetMemberUser(c, r, w)
 	writeAPIResponse(r, w, true, http.StatusOK, ws.AllOnlineIDs())
 }
 
 // UserUpdate is handler for /api/users/{uuid}/update
 func UserUpdate(w http.ResponseWriter, r *http.Request) {
-	_, user, err := apiBootstrapRequireLogin(r, w, http.MethodPut, true)
-	if err != nil {
-		return
-	}
+	c := htp.GetController(r)
+	user := controls.GetMemberUser(c, r, w)
 	uu := mux.Vars(r)["uuid"]
 	u, ok := db.QueryUserByUUID(uu)
-	if !ok {
-		return
-	}
-	if hGrabFormStrings(r, w, "p_name") != nil {
-		return
-	}
+	c.Assert(ok, "404: unable to find user with that uuid")
+	controls.AssertFormKeysExist(c, r, "p_name")
 
 	successCb := func(us *db.User, pk, pv string) {
 		db.CreateAudit(db.ActionUserUpdate, user, us.UUID, pk, pv)
@@ -75,10 +65,7 @@ func UserUpdate(w http.ResponseWriter, r *http.Request) {
 	v := r.Form.Get("p_value")
 	up := ws.UserPerms{}.From(user)
 	if n != "nickname" {
-		if len(v) == 0 {
-			writeAPIResponse(r, w, false, http.StatusBadRequest, "missing form value 'p_value'.")
-			return
-		}
+		c.Assert(len(v) > 0, "400: missing form value p_value")
 	}
 	switch n {
 	case "nickname":
@@ -92,12 +79,8 @@ func UserUpdate(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		if !up.ManageRoles {
-			return
-		}
-		if user.GetRolesSorted()[0].Position >= rl.Position {
-			return
-		}
+		c.Assert(up.ManageRoles, "403: users require the manage_roles permission to update roles")
+		c.Assert(user.GetRolesSorted()[0].Position < rl.Position, "403: role rank must be higher to update")
 		u.AddRole(v)
 		successCb(u, n, v)
 	case "remove_role":
@@ -105,12 +88,8 @@ func UserUpdate(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		if !up.ManageRoles {
-			return
-		}
-		if user.GetRolesSorted()[0].Position >= rl.Position {
-			return
-		}
+		c.Assert(up.ManageRoles, "403: users require the manage_roles permission to update roles")
+		c.Assert(user.GetRolesSorted()[0].Position < rl.Position, "403: role rank must be higher to update")
 		u.RemoveRole(v)
 		successCb(u, n, v)
 	}

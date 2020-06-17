@@ -8,50 +8,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nektro/mantle/pkg/db"
-
-	"github.com/gorilla/sessions"
-	"github.com/nektro/go-util/arrays/stringsu"
 	"github.com/nektro/go-util/util"
-	etc "github.com/nektro/go.etc"
+	"github.com/nektro/go.etc/htp"
 	sdrie "github.com/nektro/go.sdrie"
 
 	. "github.com/nektro/go-util/alias"
 )
 
 var (
-	formMethods = []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}
-	badgeCache  = sdrie.New()
+	badgeCache = sdrie.New()
 )
 
-func apiBootstrapRequireLogin(r *http.Request, w http.ResponseWriter, method string, assertMembership bool) (*sessions.Session, *db.User, error) {
-	if r.Method != method {
-		return nil, nil, writeAPIResponse(r, w, false, http.StatusMethodNotAllowed, "This action requires using HTTP "+method)
+// Init sets up this package
+func Init() {
+	htp.ErrorHandleFunc = func(w http.ResponseWriter, r *http.Request, data string) {
+		code, _ := strconv.ParseInt(data[:3], 10, 32)
+		good := !(code >= 400)
+		writeAPIResponse(r, w, good, int(code), data[5:])
 	}
-	if stringsu.Contains(formMethods, method) {
-		r.Method = http.MethodPost
-		err := r.ParseMultipartForm(1024 * 1024 * 10)
-		if err != nil {
-			return nil, nil, writeAPIResponse(r, w, false, http.StatusBadRequest, "Error parsing form data. "+err.Error())
-		}
-		r.Method = method
-	}
-
-	sess := etc.GetSession(r)
-	sessID := sess.Values["user"]
-
-	if sessID == nil {
-		return nil, nil, writeAPIResponse(r, w, false, http.StatusUnauthorized, "Must login to access this resource")
-	}
-
-	userID := sessID.(string)
-	user, _ := db.QueryUserByUUID(userID)
-
-	if assertMembership && !user.IsMember {
-		return nil, nil, writeAPIResponse(r, w, false, http.StatusForbidden, "This action requires being a member of this server.")
-	}
-
-	return sess, user, nil
 }
 
 func writeAPIResponse(r *http.Request, w http.ResponseWriter, good bool, status int, message interface{}) error {
@@ -70,7 +44,7 @@ func writeAPIResponse(r *http.Request, w http.ResponseWriter, good bool, status 
 }
 
 func hGrabInt(s string) (string, int64, error) {
-	n, err := strconv.ParseInt(s, 10, 64)
+	n, err := strconv.ParseInt(s, 10, 32)
 	return s, n, err
 }
 
@@ -90,16 +64,6 @@ func hBadge(w http.ResponseWriter, r *http.Request, l, m, c string) {
 	}
 	badgeCache.Set(k, bys, time.Minute*10)
 	fmt.Fprintln(w, string(bys))
-}
-
-func hGrabFormStrings(r *http.Request, w http.ResponseWriter, s ...string) error {
-	for _, item := range s {
-		if !(len(r.Form.Get(item)) > 0) {
-			writeAPIResponse(r, w, false, http.StatusBadRequest, "missing form value '"+item+"'.")
-			return E("missing " + item + " in form")
-		}
-	}
-	return nil
 }
 
 func hBetween(x, l, h int) bool {

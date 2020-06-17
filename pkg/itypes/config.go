@@ -5,8 +5,11 @@ import (
 )
 
 type Config struct {
-	Port      int
-	Clients   []oauth2.AppConf  `json:"clients"`
-	Providers []oauth2.Provider `json:"providers"`
-	Themes    []string          `json:"themes"`
+	Clients        []oauth2.AppConf  `json:"clients"`
+	Providers      []oauth2.Provider `json:"providers"`
+	Themes         []string          `json:"themes"`
+	Port           int
+	JWTSecret      string
+	RedisURL       string
+	MaxMemberCount int
 }

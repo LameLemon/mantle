@@ -1,23 +1,28 @@
 package ws
 
 import (
-	"container/list"
 	"net/http"
 
 	"github.com/nektro/mantle/pkg/db"
+	"github.com/nektro/mantle/pkg/store"
 
 	"github.com/gorilla/websocket"
 )
 
-var (
-	reqUpgrader = websocket.Upgrader{ReadBufferSize: 1024, WriteBufferSize: 1024}
-	connected   = list.New() // user UUIDs
+const (
+	keyOnline = "online_users"
 )
 
 var (
+	reqUpgrader = websocket.Upgrader{ReadBufferSize: 1024, WriteBufferSize: 1024}
+)
+
+var (
+	// UserCache is the list of users currently with ws connections to this instance
 	UserCache = map[string]*User{}
 )
 
+// Connect takes a db.User and upgrades it to a ws.User
 func Connect(user *db.User, w http.ResponseWriter, r *http.Request) (*User, error) {
 	conn, err := reqUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -26,12 +31,11 @@ func Connect(user *db.User, w http.ResponseWriter, r *http.Request) (*User, erro
 	u := &User{
 		conn,
 		user,
-		UserPerms{}.From(user),
 	}
 	UserCache[u.User.UUID] = u
 
 	if !u.IsConnected() {
-		connected.PushBack(u.User.UUID)
+		store.This.ListAdd(keyOnline, u.User.UUID)
 		BroadcastMessage(map[string]interface{}{
 			"type": "user-connect",
 			"user": u.User.UUID,
@@ -40,23 +44,26 @@ func Connect(user *db.User, w http.ResponseWriter, r *http.Request) (*User, erro
 	return u, nil
 }
 
+// Close disconnect all remaining users
 func Close() {
-	// disconnect all remaining users
 	for _, item := range UserCache {
 		item.Conn.Close()
 	}
 }
 
+// BroadcastMessage sends message to all users
 func BroadcastMessage(message map[string]interface{}) {
 	for _, item := range UserCache {
 		item.SendMessageRaw(message)
 	}
 }
 
+// AllOnlineIDs returns ULID of every online user
 func AllOnlineIDs() []string {
-	return listToArray(connected)
+	return store.This.ListGet(keyOnline)
 }
 
+// OnlineUserCount is the total number of active users
 func OnlineUserCount() int64 {
-	return int64(len(UserCache))
+	return int64(store.This.ListLen(keyOnline))
 }

@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/nektro/mantle/pkg/store"
+
 	"github.com/nektro/go-util/arrays/stringsu"
 	"github.com/nektro/go-util/util"
 	dbstorage "github.com/nektro/go.dbstorage"
@@ -37,8 +39,8 @@ func QueryUserBySnowflake(provider string, flake string, name string) *User {
 	if ok {
 		return us
 	}
-	dbstorage.InsertsLock.Lock()
-	defer dbstorage.InsertsLock.Unlock()
+	store.This.Lock()
+	defer store.This.Unlock()
 	//
 	id := db.QueryNextID(cTableUsers)
 	uid := newUUID()
@@ -50,6 +52,7 @@ func QueryUserBySnowflake(provider string, flake string, name string) *User {
 	}
 	u := &User{id, provider, flake, uid, false, false, name, "", co, co, roles}
 	db.Build().InsI(cTableUsers, u).Exe()
+	Props.Increment("count_" + cTableUsers)
 	return u
 }
 
@@ -80,7 +83,14 @@ func (v User) MemberCount() int64 {
 //
 
 func (u *User) SetAsMember(b bool) {
+	m := u.IsMember
 	db.Build().Up(cTableUsers, "is_member", strconv.Itoa(util.Btoi(b))).Wh("uuid", u.UUID).Exe()
+	if !m && b {
+		Props.Increment("count_users_members")
+	}
+	if m && !b {
+		Props.Decrement("count_users_members")
+	}
 	u.IsMember = b
 }
 

@@ -4,6 +4,9 @@ import (
 	"database/sql"
 	"strconv"
 
+	"github.com/nektro/mantle/pkg/store"
+
+	"github.com/nektro/go-util/util"
 	dbstorage "github.com/nektro/go.dbstorage"
 )
 
@@ -26,15 +29,16 @@ type Invite struct {
 
 // CreateInvite creates a new permanent invite and returns it
 func CreateInvite() *Invite {
-	dbstorage.InsertsLock.Lock()
-	defer dbstorage.InsertsLock.Unlock()
+	store.This.Lock()
+	defer store.This.Unlock()
 	//
 	id := db.QueryNextID(cTableInvites)
 	uid := newUUID()
 	co := now()
-	code := randomString(8)
+	code := util.RandomString(8)
 	n := &Invite{id, uid, co, code, 0, 0, 0, "", NewTime(timeZero), false, Array{}}
 	db.Build().InsI(cTableInvites, n).Exe()
+	Props.Increment("count_" + cTableInvites)
 	return n
 }
 
@@ -73,9 +77,11 @@ func (v Invite) All() []*Invite {
 //
 
 // Use increments Uses by 1
-func (v *Invite) Use() {
+func (v *Invite) Use(u *User) {
 	v.Uses++
 	db.Build().Up(cTableInvites, "uses", strconv.FormatInt(v.Uses, 10)).Wh("uuid", v.UUID).Exe()
+	CreateAudit(ActionInviteUse, u, v.UUID, v.Code, "")
+	u.SetAsMember(true)
 }
 
 // SetMaxUses sets
@@ -87,4 +93,5 @@ func (v *Invite) SetMaxUses(p int64) {
 // Delete removes this item from the database
 func (v *Invite) Delete() {
 	db.Build().Del(cTableInvites).Wh("uuid", v.UUID).Exe()
+	Props.Decrement("count_" + cTableInvites)
 }

@@ -16,7 +16,7 @@
         <link rel="stylesheet" href="./../style.css">
         <script defer src="https://cdnjs.cloudflare.com/ajax/libs/limonte-sweetalert2/7.33.1/sweetalert2.min.js" integrity="sha256-rNQvJc3/MuwBWFwVTqr0qJ91nWA1pR7PDLk31hgGqP8=" crossorigin="anonymous"></script>
         <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js" integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo=" crossorigin="anonymous"></script>
-        <script defer src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/12.0.4/2/twemoji.min.js" integrity="sha256-Pbqu2FUGGcJj9IWMiV6JVz6q2BjlGeVrwFW/aXFE5xk=" crossorigin="anonymous"></script>
+        <script defer src="https://twemoji.maxcdn.com/v/13.0.0/twemoji.min.js" integrity="sha384-avLpk7eChiSgpDvwa4N7hvg9vj6V9sfFmGHurVkPOlWUalASzcO3d2x3qcbQqhsH" crossorigin="anonymous"></script>
         <script defer src="https://cdnjs.cloudflare.com/ajax/libs/custom-elements/1.4.0/custom-elements.min.js" integrity="sha256-vv/BrFy1OaYwh6wQq1T9z7QUVv5HLaZ5XS13D96g5nE=" crossorigin="anonymous"></script>
         <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js" integrity="sha256-KM512VNnjElC30ehFwehXjx1YCHPiQkOPmqnrWtpccM=" crossorigin="anonymous"></script>
         <script defer src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.24.0/moment-with-locales.min.js" integrity="sha256-AdQN98MVZs44Eq2yTwtoKufhnU+uZ7v2kXnD5vqzZVo=" crossorigin="anonymous"></script>
@@ -110,6 +110,7 @@
                         <x-text-setting endpoint="./../api/update_property" name="cover_photo" label="{{translate 's032'}}"></x-text-setting>
                         <x-text-setting endpoint="./../api/update_property" name="profile_photo" label="{{translate 's033'}}"></x-text-setting>
                         <x-2s-toggle endpoint="./../api/update_property" name="public" label="{{translate 's025'}}"></x-2s-toggle>
+                        <x-text-setting endpoint="./../api/update_property" name="count_users_members_max" label="Max Member Count" type="number" min="0" fill=""></x-text-setting>
                     </div>
                     <div data-s-section="audits">
                         <h2>{{translate 's045'}}</h2>
@@ -175,18 +176,6 @@
                 </div>
             </div>
         </x-settings>
-        <dialog class="popup user">
-            <h2 data-bind="pp_user_nickname"></h2>
-            <h2><span data-bind="pp_user_name"></span><span>#<span data-bind="pp_user_id"></span></span></h2>
-            <div data-bind="pp_user_uuid"></div>
-            <div>Provider: <span data-bind="pp_user_provider"></span></div>
-            <hr>
-            <div>Roles</div>
-            <ol></ol>
-            <div data-requires="manage_roles">
-                <i class="plus icon"></i>
-                <ol></ol>
-            </div>
-        </dialog>
+        <x-user-dialog></x-user-dialog>
     </body>
 </html>

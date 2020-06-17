@@ -10,12 +10,15 @@ import (
 	"github.com/nektro/mantle/pkg/db"
 	"github.com/nektro/mantle/pkg/handler"
 	"github.com/nektro/mantle/pkg/idata"
+	"github.com/nektro/mantle/pkg/metrics"
+	"github.com/nektro/mantle/pkg/store"
 	"github.com/nektro/mantle/pkg/ws"
 
 	"github.com/nektro/go-util/util"
+	"github.com/nektro/go-util/vflag"
 	etc "github.com/nektro/go.etc"
+	"github.com/nektro/go.etc/htp"
 	"github.com/nektro/go.etc/translations"
-	"github.com/spf13/pflag"
 
 	_ "github.com/nektro/mantle/statik"
 )
@@ -26,24 +29,29 @@ var Version = "vMASTER"
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
-	idata.Version = etc.FixBareVersion(Version)
-	util.Log("Welcome to " + idata.Name + " " + idata.Version + ".")
-
-	//
-	pflag.IntVar(&idata.Config.Port, "port", 8000, "The port to bind the web server to.")
 	etc.AppID = strings.ToLower(idata.Name)
-	etc.PreInit()
+	idata.Version = etc.FixBareVersion(Version)
+	idata.Version = strings.ReplaceAll(idata.Version, "-", ".")
+	util.Log("Starting " + idata.Name + " " + idata.Version + ".")
 
 	//
-	etc.Init("mantle", &idata.Config, "./verify", handler.SaveOAuth2InfoCb)
+	vflag.StringVar(&idata.Config.RedisURL, "redis-url", "", "")
+	vflag.IntVar(&idata.Config.MaxMemberCount, "max-member-count", 0, "")
+
+	etc.PreInit()
+	etc.Init(&idata.Config, "./verify", handler.SaveOAuth2InfoCb)
 
 	//
 	// database initialization
+
+	store.Init()
 
 	db.Init()
 
 	translations.Fetch()
 	translations.Init()
+
+	metrics.Init()
 
 	//
 	// setup graceful stop
@@ -64,122 +72,53 @@ func main() {
 	//
 	// create http service
 
-	fRegister("/", sPaths{
-		GET: handler.InviteGet,
-		Sub: map[string]sPaths{
-			"invite":  sPaths{POS: handler.InvitePost},
-			"verify":  sPaths{GET: handler.Verify},
-			"ws":      sPaths{GET: handler.Websocket},
-			"chat": sPaths{
-				Sub: map[string]sPaths{
-					"": sPaths{GET: handler.Chat},
-				},
-			},
-			"api": sPaths{
-				Sub: map[string]sPaths{
-					"about":           sPaths{GET: handler.ApiAbout},
-					"update_property": sPaths{PUT: handler.ApiPropertyUpdate},
-					"etc": sPaths{
-						Sub: map[string]sPaths{
-							"role_colors.css": sPaths{GET: handler.EtcRoleColorCSS},
-							"badges": sPaths{
-								Sub: map[string]sPaths{
-									"members_online.svg": sPaths{GET: handler.EtcBadgeMembersOnline},
-									"members_total.svg":  sPaths{GET: handler.EtcBadgeMembersTotal},
-								},
-							},
-						},
-					},
-					"users": sPaths{
-						Sub: map[string]sPaths{
-							"@me":    sPaths{GET: handler.UsersMe},
-							"online": sPaths{GET: handler.UsersOnline},
-							"{uuid}": sPaths{
-								GET: handler.UsersRead,
-								PUT: handler.UserUpdate,
-							},
-						},
-					},
-					"channels": sPaths{
-						Sub: map[string]sPaths{
-							"@me":    sPaths{GET: handler.ChannelsMe},
-							"create": sPaths{POS: handler.ChannelCreate},
-							"{uuid}": sPaths{
-								GET: handler.ChannelRead,
-								PUT: handler.ChannelUpdate,
-								DEL: handler.ChannelDelete,
-								Sub: map[string]sPaths{
-									"messages": sPaths{
-										GET: handler.ChannelMessagesRead,
-										DEL: handler.ChannelMessagesDelete,
-									},
-								},
-							},
-						},
-					},
-					"roles": sPaths{
-						Sub: map[string]sPaths{
-							"@me":    sPaths{GET: handler.RolesMe},
-							"create": sPaths{POS: handler.RolesCreate},
-							"{uuid}": sPaths{
-								PUT: handler.RoleUpdate,
-								DEL: handler.RoleDelete,
-							},
-						},
-					},
-					"invites": sPaths{
-						Sub: map[string]sPaths{
-							"@me":    sPaths{GET: handler.InvitesMe},
-							"create": sPaths{POS: handler.InvitesCreate},
-							"{uuid}": sPaths{
-								PUT: handler.InviteUpdate,
-								DEL: handler.InviteDelete,
-							},
-						},
-					},
-					"admin": sPaths{
-						Sub: map[string]sPaths{
-							"audits.csv": sPaths{GET: handler.AuditsCsv},
-						},
-					},
-				},
-			},
-		},
-	})
+	handler.Init()
+
+	htp.Register("/", http.MethodGet, handler.InviteGet)
+	htp.Register("/invite", http.MethodGet, handler.InvitePost)
+	htp.Register("/verify", http.MethodGet, handler.Verify)
+	htp.Register("/ws", http.MethodGet, handler.Websocket)
+	htp.Register("/metrics", http.MethodGet, metrics.Handler())
+
+	htp.Register("/chat/", http.MethodGet, handler.Chat)
+
+	htp.Register("/api/about", http.MethodGet, handler.ApiAbout)
+	htp.Register("/api/update_property", http.MethodPut, handler.ApiPropertyUpdate)
+
+	htp.Register("/api/etc/role_colors.css", http.MethodGet, handler.EtcRoleColorCSS)
+
+	htp.Register("/api/etc/badges/version.svg", http.MethodGet, handler.EtcBadgeVersion)
+	htp.Register("/api/etc/badges/members_online.svg", http.MethodGet, handler.EtcBadgeMembersOnline)
+	htp.Register("/api/etc/badges/members_total.svg", http.MethodGet, handler.EtcBadgeMembersTotal)
+
+	htp.Register("/api/users/@me", http.MethodGet, handler.UsersMe)
+	htp.Register("/api/users/online", http.MethodGet, handler.UsersOnline)
+	htp.Register("/api/users/{uuid}", http.MethodGet, handler.UsersRead)
+	htp.Register("/api/users/{uuid}", http.MethodPut, handler.UserUpdate)
+
+	htp.Register("/api/channels/@me", http.MethodGet, handler.ChannelsMe)
+	htp.Register("/api/channels/create", http.MethodPost, handler.ChannelCreate)
+	htp.Register("/api/channels/{uuid}", http.MethodGet, handler.ChannelRead)
+	htp.Register("/api/channels/{uuid}", http.MethodPut, handler.ChannelUpdate)
+	htp.Register("/api/channels/{uuid}", http.MethodDelete, handler.ChannelDelete)
+
+	htp.Register("/api/channels/{uuid}/messages", http.MethodGet, handler.ChannelMessagesRead)
+	htp.Register("/api/channels/{uuid}/messages", http.MethodDelete, handler.ChannelMessagesDelete)
+
+	htp.Register("/api/roles/@me", http.MethodGet, handler.RolesMe)
+	htp.Register("/api/roles/create", http.MethodPost, handler.RolesCreate)
+	htp.Register("/api/roles/{uuid}", http.MethodPut, handler.RoleUpdate)
+	htp.Register("/api/roles/{uuid}", http.MethodDelete, handler.RoleDelete)
+
+	htp.Register("/api/invites/@me", http.MethodGet, handler.InvitesMe)
+	htp.Register("/api/invites/create", http.MethodPost, handler.InvitesCreate)
+	htp.Register("/api/invites/{uuid}", http.MethodPut, handler.InviteUpdate)
+	htp.Register("/api/invites/{uuid}", http.MethodDelete, handler.InviteDelete)
+
+	htp.Register("/api/admin/audits.csv", http.MethodGet, handler.AuditsCsv)
 
 	//
 	// start server
 
-	etc.StartServer(idata.Config.Port)
-}
-
-type sPaths struct {
-	GET http.HandlerFunc
-	POS http.HandlerFunc
-	PUT http.HandlerFunc
-	DEL http.HandlerFunc
-	Sub map[string]sPaths
-}
-
-func iregister(m, p string, h http.HandlerFunc) {
-	if h == nil {
-		return
-	}
-	etc.Router.Methods(m).Path(p).HandlerFunc(h)
-}
-
-func fRegister(s string, p sPaths) {
-	if strings.HasPrefix(s, "//") {
-		s = s[1:]
-	}
-	iregister(http.MethodGet, s, p.GET)
-	iregister(http.MethodPost, s, p.POS)
-	iregister(http.MethodPut, s, p.PUT)
-	iregister(http.MethodDelete, s, p.DEL)
-	//
-	if p.Sub != nil {
-		for k, v := range p.Sub {
-			fRegister(s+"/"+k, v)
-		}
-	}
+	etc.StartServer()
 }
