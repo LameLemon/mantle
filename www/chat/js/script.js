@@ -198,11 +198,20 @@ document.getElementById("shrink_uonline").addEventListener("click", () => {
 
     input.addEventListener('input', (e) => {
         let input = e.target.value.toLowerCase();
-        if (input[0] === '/' || input[0] === ':'){
+        let emotes = input.match(/(\/|:)([a-zA-Z_.()&\-,'ôíéãå!#*0-9]+)?(:)? ?/g);
+        if (emotes) do {
+            let emote = emotes[emotes.length - 1];
+            // remove suggestions is emote is complete of out of range
+            if (emote[emote.length - 1] == " ") {
+                processor_options = []
+                draw_suggestions(processor_options);
+                break;
+            }
+
             // get possible matches
             processor_options = [];
             for (const processor of msg_processors) {
-                if (processor[0].toLowerCase().indexOf(input) > -1) {
+                if (processor[0].toLowerCase().indexOf(emote) > -1) {
                     processor.push(false);
                     processor_options.push(processor);
                 }
@@ -212,7 +221,8 @@ document.getElementById("shrink_uonline").addEventListener("click", () => {
                 processor_options = processor_options.slice(0, 10);
             if (processor_options.length > 0)
                 processor_options[0][2] = true;
-        } else {
+        } while (false);
+        else {
             // if no command remove suggestions
             processor_options = []
         }
@@ -225,18 +235,22 @@ document.getElementById("shrink_uonline").addEventListener("click", () => {
         if (e.key === "Enter") {
             let msg_con = "";
             if (processor_options.length) {
-                msg_con = processor_options.find(element => element[2] == true)[0];
+                let input = e.target.value.toLowerCase();
+                let emote = processor_options.find(element => element[2] == true)[0];
+                let emotes = input.match(/(\/|:)([a-zA-Z_.()&\-,'ôíéãå!#*0-9]+)?(:)?/g);
+                msg_con = input.replace(emotes[emotes.length - 1], emote)
                 processor_options = [];
+                e.target.value = msg_con;
             } else {
                 msg_con = e.target.value;
+                socket.send(JSON.stringify({
+                    type: "message",
+                    in: output.active_channel_uid,
+                    message: msg_con.trim(),
+                }));
+                e.target.value = "";
             }
             if (msg_con.length === 0) return;
-            socket.send(JSON.stringify({
-                type: "message",
-                in: output.active_channel_uid,
-                message: msg_con.trim(),
-            }));
-            e.target.value = "";
             draw_suggestions(processor_options)
         }
     });
