@@ -169,64 +169,67 @@ document.getElementById("shrink_uonline").addEventListener("click", () => {
 
     let processor_options = [];
 
-    //
+    input.addEventListener('keydown', function(e) {
+        const i = processor_options.findIndex(element => element[2] == true);
+        if (processor_options.length != 0) {
+            switch (event.key) {
+                case "ArrowUp":
+                    if (i > 0) {
+                        processor_options[i][2] = false;
+                        processor_options[i - 1][2] = true;
+                    } else {
+                        processor_options[i][2] = false;
+                        processor_options[processor_options.length - 1][2] = true;
+                    }
+                    break;
+                case "ArrowDown":
+                    if (i < processor_options.length - 1) {
+                        processor_options[i][2] = false;
+                        processor_options[i + 1][2] = true;
+                    } else {
+                        processor_options[i][2] = false;
+                        processor_options[0][2] = true;
+                    }
+                    break;
+            }
+            draw_suggestions(processor_options);
+        }
+    });
+
     input.addEventListener('input', (e) => {
         let input = e.target.value.toLowerCase();
-        if (input[0] === '/'){
+        if (input[0] === '/' || input[0] === ':'){
             // get possible matches
             processor_options = [];
             for (const processor of msg_processors) {
                 if (processor[0].toLowerCase().indexOf(input) > -1) {
+                    processor.push(false);
                     processor_options.push(processor);
                 }
             }
-
-            // check if suggestion box open
-            let suggestions = document.getElementById("suggestions");
-            let ul;
-            if (!suggestions) {
-                suggestions = document.createElement("div");
-                suggestions.setAttribute("id", "suggestions");
-                ul = document.createElement("ul");
-            } else {
-                ul = suggestions.children[0];
-            }
-            while(ul.firstChild) ul.removeChild(ul.firstChild);
-
-            // create suggestion box
-            for (const processor of processor_options) {
-                console.log(processor[0]);
-                let li = document.createElement("li");
-                li.appendChild(document.createTextNode(processor[0]));
-                let b = document.createElement("b");
-                b.appendChild(document.createTextNode(processor[1]))
-                li.appendChild(b);
-                ul.appendChild(li)
-            }
-            if (ul.firstChild)
-                ul.firstChild.setAttribute("id", "selected-suggestion");
-            suggestions.appendChild(ul);
-            document.body.appendChild(suggestions);
-            console.log(processor_options);
-            console.log(suggestions);
-
+            // shorten list and set first option to as suggested
+            if (processor_options.length > 10)
+                processor_options = processor_options.slice(0, 10);
+            if (processor_options.length > 0)
+                processor_options[0][2] = true;
         } else {
             // if no command remove suggestions
             processor_options = []
-            let suggestions = document.getElementById("suggestions");
-            if (suggestions)
-                suggestions.parentNode.removeChild(suggestions);
         }
+        draw_suggestions(processor_options)
+
     });
 
     //
     input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
             let msg_con = "";
-            if (processor_options.length)
-                msg_con = processor_options[0][0];
-            else
+            if (processor_options.length) {
+                msg_con = processor_options.find(element => element[2] == true)[0];
+                processor_options = [];
+            } else {
                 msg_con = e.target.value;
+            }
             if (msg_con.length === 0) return;
             socket.send(JSON.stringify({
                 type: "message",
@@ -234,10 +237,36 @@ document.getElementById("shrink_uonline").addEventListener("click", () => {
                 message: msg_con.trim(),
             }));
             e.target.value = "";
-            // remove suggestions if exists
-            let suggestions = document.getElementById("suggestions");
-            if (suggestions)
-                suggestions.parentNode.removeChild(suggestions);
+            draw_suggestions(processor_options)
         }
     });
 })();
+
+function draw_suggestions(processor_options) {
+    // check if suggestion box open
+    let suggestions = document.getElementById("suggestions");
+    let ul;
+    if (!suggestions) {
+        suggestions = document.createElement("div");
+        suggestions.setAttribute("id", "suggestions");
+        ul = document.createElement("ul");
+    } else {
+        ul = suggestions.children[0];
+    }
+    while(ul.firstChild) ul.removeChild(ul.firstChild);
+
+    // create suggestion box
+    for (const processor of processor_options) {
+        let li = document.createElement("li");
+        li.appendChild(document.createTextNode(processor[0]));
+        let b = document.createElement("b");
+        b.appendChild(document.createTextNode(processor[1]))
+        if (processor[2])
+            li.setAttribute("id", "selected-suggestion");
+        li.appendChild(b);
+        ul.appendChild(li)
+    }
+
+    suggestions.appendChild(ul);
+    document.body.appendChild(suggestions);
+}
